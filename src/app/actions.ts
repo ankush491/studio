@@ -1,14 +1,16 @@
 "use server";
 
 import { z } from "zod";
+import { chromium } from "playwright";
 import {
-  generateActionLog,
-  GenerateActionLogInput,
-} from "@/ai/flows/generate-action-log";
+  generatePlaywrightSteps,
+  PlaywrightStep,
+} from "@/ai/flows/generate-playwright-steps";
 import {
   generateTestingReport,
   GenerateTestingReportInput,
 } from "@/ai/flows/generate-testing-report";
+import { generateActionLog } from "@/ai/flows/generate-action-log";
 
 const formSchema = z.object({
   url: z.string().url(),
@@ -33,37 +35,47 @@ export async function runTest(values: FormValues): Promise<{
     };
   }
 
-  const { url, prompt, username } = validation.data;
+  const { url, prompt, username, password } = validation.data;
+  let browser;
+  const recordedActions: string[] = [];
 
   try {
-    // 1. Simulate the "PlaywrightMCP" action description.
-    // In a real application, this would come from the output of an automation tool.
-    const actionDescription = `The testing agent initiated a session for the URL: ${url}. 
-${
-  username
-    ? `The agent attempted to log in using the username "${username}". `
-    : ""
-}The agent then proceeded to execute the test based on the user's prompt: "${prompt}". 
-The automated script navigated through the website, clicked on specified elements, filled out forms where necessary, and checked for visible errors or broken functionality. All interactions were logged.`;
-
-    // 2. Generate the detailed action log using the first AI flow.
-    const actionLogInput: GenerateActionLogInput = {
+    // 1. Generate Playwright steps from the user prompt
+    const { steps } = await generatePlaywrightSteps({
       url,
       prompt,
-      actionDescription,
-    };
-    const actionLogOutput = await generateActionLog(actionLogInput);
-    const actionLog = actionLogOutput.actionLog;
+      username,
+      password,
+    });
 
-    if (!actionLog) {
-      throw new Error("Failed to generate action log.");
+    if (!steps || steps.length === 0) {
+      throw new Error("AI could not determine the testing steps.");
     }
 
-    // 3. Generate the final testing report using the second AI flow.
+    // 2. Execute Playwright steps
+    browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+
+    for (const step of steps) {
+      const actionDescription = await executePlaywrightStep(page, step);
+      const logEntry = await generateActionLog({
+        url,
+        prompt,
+        actionDescription,
+      });
+      recordedActions.push(logEntry.actionLog);
+    }
+
+    await browser.close();
+
+    const fullActionLog = recordedActions.join("\n");
+
+    // 3. Generate final testing report
     const testingReportInput: GenerateTestingReportInput = {
       url,
       prompt,
-      actionLogs: actionLog,
+      actionLogs: fullActionLog,
     };
     const testingReportOutput = await generateTestingReport(testingReportInput);
     const report = testingReportOutput.report;
@@ -74,11 +86,14 @@ The automated script navigated through the website, clicked on specified element
 
     return {
       success: true,
-      actionLog,
+      actionLog: fullActionLog,
       report,
     };
   } catch (error) {
     console.error("Error during test execution:", error);
+    if (browser) {
+      await browser.close();
+    }
     const errorMessage =
       error instanceof Error
         ? error.message
@@ -87,5 +102,34 @@ The automated script navigated through the website, clicked on specified element
       success: false,
       error: errorMessage,
     };
+  }
+}
+
+async function executePlaywrightStep(
+  page: any,
+  step: PlaywrightStep
+): Promise<string> {
+  const { command, selector, value, description } = step;
+
+  try {
+    switch (command) {
+      case "goto":
+        await page.goto(value);
+        break;
+      case "click":
+        await page.click(selector);
+        break;
+      case "fill":
+        await page.fill(selector, value);
+        break;
+      case "waitForNavigation":
+        await page.waitForNavigation();
+        break;
+      default:
+        throw new Error(`Unsupported Playwright command: ${command}`);
+    }
+    return `SUCCESS: ${description}`;
+  } catch (e: any) {
+    return `FAILURE: ${description}. Error: ${e.message}`;
   }
 }

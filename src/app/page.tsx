@@ -109,7 +109,7 @@ export default function Home() {
             <CardHeader>
               <CardTitle className="text-2xl">Test Configuration</CardTitle>
               <CardDescription>
-                Enter the details for your automated test.
+                Enter the details for your automated test. The AI will generate and run Playwright tests.
               </CardDescription>
             </CardHeader>
             <Form {...form}>
