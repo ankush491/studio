@@ -53,7 +53,10 @@ export async function runTest(values: FormValues): Promise<{
     }
 
     // 2. Execute Playwright steps
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({
+      headless: false, // Launch in non-headless mode
+      timeout: 60000, // Increase default timeout to 60 seconds
+    });
     const context = await browser.newContext();
     const page = await context.newPage();
 
