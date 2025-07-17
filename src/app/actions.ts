@@ -112,18 +112,31 @@ async function executePlaywrightStep(
   page: any,
   step: PlaywrightStep
 ): Promise<string> {
-  const { command, selector, value, description } = step;
+  const { command, selector, value, description } = step;  
+  const defaultTimeout = 60000; // 60 seconds
 
   try {
     switch (command) {
       case "goto":
-        await page.goto(value);
+        await page.goto(value, { timeout: defaultTimeout });
         break;
       case "click":
-        await page.click(selector);
+        if (selector) {
+          // Wait for the element to be visible before clicking
+          await page.waitForSelector(selector, { state: 'visible', timeout: defaultTimeout });
+          await page.click(selector, { timeout: defaultTimeout });
+        } else {
+          throw new Error("Selector is required for click command.");
+        }
         break;
       case "fill":
-        await page.fill(selector, value);
+        if (selector && value !== undefined) {
+          // Wait for the element to be visible before filling
+          await page.waitForSelector(selector, { state: 'visible', timeout: defaultTimeout });
+          await page.fill(selector, value, { timeout: defaultTimeout });
+        } else {
+          throw new Error("Selector and value are required for fill command.");
+        }
         break;
       case "waitForNavigation":
         await page.waitForNavigation();
